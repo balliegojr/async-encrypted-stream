@@ -1,0 +1,21 @@
+[package]
+name = "async-encrypted-stream"
+version = "0.1.0"
+authors = ["Ilson Roberto Balliego Junior <ilson.balliego@gmail.com>"]
+edition = "2021"
+description = "Async Read and Write wrappers around the chacha20 encryption primitives"
+repository = "https://github.com/balliegojr/async-encrypted-stream"
+license = "MIT"
+keywords = ["aead", "chacha20", "poly1035", "tokio", "stream"]
+categories = ["cryptography", "network-programming"]
+
+[dependencies]
+bytes = "1.0"
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+pin-project-lite = "0.2"
+tokio = { version = "1.23" }
+
+[dev-dependencies]
+pbkdf2 = "0.12.1"
+sha2 = "0.10.6"
+tokio = { version = "1.23.0", features = ["full"] }
