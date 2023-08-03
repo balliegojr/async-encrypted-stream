@@ -62,19 +62,19 @@ where
     ///
     /// [0, 0, 0, 0, ...]
     ///
-    /// If the encryption fails, it returns [Option::None]
-    fn get_encrypted(&mut self, buf: &[u8]) -> Option<Vec<u8>> {
-        match self.encryptor.encrypt_next(buf) {
-            Ok(mut encrypted) => {
-                let len = (encrypted.len() as u32).to_le_bytes();
-                let mut buf = Vec::with_capacity(encrypted.len() + std::mem::size_of::<u32>());
-                buf.extend_from_slice(&len);
-                buf.append(&mut encrypted);
+    /// If the encryption fails, it returns [std::error::ErrorKind::InvalidInput]
+    fn get_encrypted(&mut self, buf: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut encrypted = self
+            .encryptor
+            .encrypt_next(buf)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
 
-                Some(buf)
-            }
-            Err(_) => None,
-        }
+        let len = (encrypted.len() as u32).to_le_bytes();
+        let mut buf = Vec::with_capacity(encrypted.len() + std::mem::size_of::<u32>());
+        buf.extend_from_slice(&len);
+        buf.append(&mut encrypted);
+
+        Ok(buf)
     }
 
     /// Flush the internal buffer into the inner writer. This functions does nothing if the
@@ -139,10 +139,7 @@ where
 
         let mut total_written = 0;
         for chunk in buf.chunks(self.chunk_size) {
-            let Some(encrypted) = self.get_encrypted(chunk) else {
-                return std::task::Poll::Ready(Err(std::io::ErrorKind::InvalidInput.into()));
-            };
-
+            let encrypted = self.get_encrypted(chunk)?;
             total_written += chunk.len();
 
             let me = self.as_mut().project();

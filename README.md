@@ -8,7 +8,7 @@ To use this crate, it is necessary to add [chacha20poly1305](https://github.com/
 
 ```Cargo.toml
 async-encrypted-stream = "0.1"
-chacha20poly1305 = { version = "0.10", features = ["stream"] }
+chacha20poly1305 = { version = "0.10", features = ["stream", "std"] }
 ```
 
 Once the necessary dependencies are added, creating the stream is fairly trivial

@@ -48,9 +48,9 @@ where
     /// Produce a value if there is enough data in the internal buffer
     ///
     /// When a value is produced, it will advance the buffer to the position for the next value.
-    fn produce(mut self: Pin<&mut Self>) -> Option<Vec<u8>> {
+    fn produce(mut self: Pin<&mut Self>) -> std::io::Result<Option<Vec<u8>>> {
         if self.cap <= self.pos {
-            return None;
+            return Ok(None);
         }
 
         // Producing a value is a relatively simple operation.
@@ -70,21 +70,18 @@ where
             let decrypted = me
                 .decryptor
                 .decrypt_next(&me.buffer[*me.pos + 4..*me.pos + 4 + length])
-                .ok();
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
 
-            if decrypted.is_some() {
-                *me.pos += 4 + length;
-            }
-
+            *me.pos += 4 + length;
             if *me.pos == *me.cap {
                 *me.pos = 0;
                 *me.cap = 0;
             }
 
-            decrypted
+            Ok(Some(decrypted))
         } else {
             self.adjust_buffer(length + 4);
-            None
+            Ok(None)
         }
     }
 
@@ -109,6 +106,15 @@ where
             me.buffer.resize(me.buffer.len() * 2, 0);
         }
     }
+
+    /// Return the contents of the internal buffer at the current position, for diagnostic
+    /// purposes.
+    ///
+    /// For each message available in the buffer, the first 4 bytes are the message length encoded
+    /// as a **little endian** u32. The end of the buffer may contain incomplete data.
+    pub fn buffer(&self) -> &[u8] {
+        &self.buffer[self.pos..]
+    }
 }
 
 impl<T, A, S> AsyncRead for ReadHalf<T, Decryptor<A, S>>
@@ -121,13 +127,16 @@ where
 {
     /// The poll read simply tries to produce a value from the internal buffer.
     /// If no value is produced, it then tries to poll more bytes from the inner reader
+    ///
+    /// This function may return a [std::io::ErrorKind::InvalidData] if it is not possible to decrypt
+    /// the message, in this case, further read attempts will always produce the same error.
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         loop {
-            if let Some(decrypted) = self.as_mut().produce() {
+            if let Some(decrypted) = self.as_mut().produce()? {
                 buf.put_slice(&decrypted);
                 return std::task::Poll::Ready(Ok(()));
             }
@@ -229,5 +238,29 @@ mod tests {
             plain_content,
             "some contentsome other contenteven more content"
         );
+    }
+
+    #[tokio::test]
+    pub async fn test_read_invalid_data() {
+        let key: [u8; 32] = get_key("key", "group");
+        let start_nonce = [0u8; 20];
+
+        let (rx, _tx) = tokio::io::duplex(100);
+
+        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new(key.as_ref().into()),
+            start_nonce.as_ref().into(),
+        );
+        let mut reader = ReadHalf::new(rx, decryptor);
+        let mut reader_data = Vec::from_iter(10u32.to_le_bytes());
+        reader_data.extend_from_slice(&[0u8; 20]);
+
+        reader.cap = reader_data.len();
+        reader.buffer = reader_data;
+
+        let mut buf = [0u8; 1024];
+
+        assert!(reader.read(&mut buf).await.is_err());
+        assert!(reader.read(&mut buf).await.is_err());
     }
 }

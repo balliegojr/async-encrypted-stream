@@ -1,6 +1,6 @@
 [package]
 name = "async-encrypted-stream"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ilson Roberto Balliego Junior <ilson.balliego@gmail.com>"]
 edition = "2021"
 description = "Async Read and Write wrappers around the chacha20 encryption primitives"
@@ -11,7 +11,7 @@ categories = ["cryptography", "network-programming"]
 
 [dependencies]
 bytes = "1.0"
-chacha20poly1305 = { version = "0.10", features = ["stream"] }
+chacha20poly1305 = { version = "0.10", features = ["stream", "std"] }
 pin-project-lite = "0.2"
 tokio = { version = "1.23" }
 
