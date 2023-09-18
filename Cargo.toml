@@ -1,6 +1,6 @@
 [package]
 name = "async-encrypted-stream"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Ilson Roberto Balliego Junior <ilson.balliego@gmail.com>"]
 edition = "2021"
 description = "Async Read and Write wrappers around the chacha20 encryption primitives"

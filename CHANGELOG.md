@@ -1,3 +1,8 @@
+# 0.1.2 
+
+### Fixes
+- Prevent panicking behavior if read buffer is smaller than decrypted message
+
 # 0.1.1 (03-08-2023)
 
 ### Fixes

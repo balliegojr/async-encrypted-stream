@@ -137,6 +137,13 @@ where
     ) -> std::task::Poll<std::io::Result<()>> {
         loop {
             if let Some(decrypted) = self.as_mut().produce()? {
+                if decrypted.len() > buf.remaining() {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::OutOfMemory,
+                        "Decrypted value exceeds buffer capacity",
+                    ))?;
+                }
+
                 buf.put_slice(&decrypted);
                 return std::task::Poll::Ready(Ok(()));
             }
