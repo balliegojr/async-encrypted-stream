@@ -1,5 +1,9 @@
-# 0.2.0
+# 0.2.1
 
+### Changes
+- Add `EncryptedStream` type alias for the return type of `encrypted_stream` and `encrypted_stream_with_capacity`
+
+# 0.2.0
 
 ### Fixes
 - Fix a panic in the read half when a message's length header arrives split across reads and lands near the end of the internal buffer

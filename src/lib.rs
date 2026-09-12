@@ -21,6 +21,9 @@ pub use write_half::WriteHalf;
 pub const DEFAULT_BUFFER_SIZE: usize = 4096;
 pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 
+pub type EncryptedStream<R, W, A, S> =
+    (ReadHalf<R, Decryptor<A, S>>, WriteHalf<W, Encryptor<A, S>>);
+
 /// Creates a pair of [ReadHalf] and [WriteHalf] with default buffer size of
 /// [self::DEFAULT_BUFFER_SIZE] and chunk size of [self::DEFAULT_CHUNK_SIZE]  
 ///
@@ -44,7 +47,7 @@ pub fn encrypted_stream<R: AsyncRead, W: AsyncWrite, A, S>(
     write: W,
     key: &Array<u8, A::KeySize>,
     nonce: &Array<u8, NonceSize<A, S>>,
-) -> (ReadHalf<R, Decryptor<A, S>>, WriteHalf<W, Encryptor<A, S>>)
+) -> EncryptedStream<R, W, A, S>
 where
     S: StreamPrimitive<A> + NewStream<A>,
     A: AeadInOut + chacha20poly1305::KeyInit,
@@ -87,7 +90,7 @@ pub fn encrypted_stream_with_capacity<R: AsyncRead, W: AsyncWrite, A, S>(
     nonce: &Array<u8, NonceSize<A, S>>,
     buffer_size: usize,
     chunk_size: usize,
-) -> (ReadHalf<R, Decryptor<A, S>>, WriteHalf<W, Encryptor<A, S>>)
+) -> EncryptedStream<R, W, A, S>
 where
     S: StreamPrimitive<A> + NewStream<A>,
     A: AeadInOut + chacha20poly1305::KeyInit,
