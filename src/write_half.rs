@@ -1,16 +1,11 @@
+use aead_stream::{Encryptor, NonceSize, StreamPrimitive};
 use bytes::{Buf, BufMut, BytesMut};
-use chacha20poly1305::{
-    aead::{
-        generic_array::ArrayLength,
-        stream::{Encryptor, NonceSize, StreamPrimitive},
-    },
-    AeadInPlace,
-};
+use chacha20poly1305::aead::{array::ArraySize, AeadInOut};
 
 use std::{
     ops::Sub,
     pin::Pin,
-    task::{ready, Poll},
+    task::{Poll, ready},
 };
 
 use tokio::io::AsyncWrite;
@@ -35,9 +30,9 @@ impl<T, A, S> WriteHalf<T, Encryptor<A, S>>
 where
     T: AsyncWrite,
     S: StreamPrimitive<A>,
-    A: AeadInPlace,
+    A: AeadInOut,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     pub fn new(inner: T, encryptor: Encryptor<A, S>) -> Self {
         Self::with_capacity(inner, encryptor, DEFAULT_BUFFER_SIZE, DEFAULT_CHUNK_SIZE)
@@ -108,9 +103,9 @@ impl<T, A, S> AsyncWrite for WriteHalf<T, Encryptor<A, S>>
 where
     T: AsyncWrite + Unpin,
     S: StreamPrimitive<A>,
-    A: AeadInPlace,
+    A: AeadInOut,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     /// Encrypt `buf` content, write into `self.inner` and returns the number of bytes
     /// encrypted.
@@ -179,7 +174,8 @@ where
 mod tests {
     use std::assert_eq;
 
-    use chacha20poly1305::{aead::stream::EncryptorLE31, KeyInit, XChaCha20Poly1305};
+    use aead_stream::EncryptorLE31;
+    use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
     use tokio::io::AsyncWriteExt;
 
     use crate::get_key;
@@ -191,11 +187,10 @@ mod tests {
         let key: [u8; 32] = get_key("key", "group");
         let start_nonce = [0u8; 20];
 
-        let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
-            chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
-                XChaCha20Poly1305::new(key.as_ref().into()),
-                start_nonce.as_ref().into(),
-            );
+        let mut encryptor: EncryptorLE31<XChaCha20Poly1305> = EncryptorLE31::from_aead(
+            XChaCha20Poly1305::new((&key).into()),
+            (&start_nonce).into(),
+        );
 
         let expected = {
             let mut encrypted = encryptor.encrypt_next("some content".as_bytes()).unwrap();
@@ -208,15 +203,15 @@ mod tests {
 
         let mut writer = WriteHalf::new(
             tokio::io::BufWriter::new(Vec::new()),
-            chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
-                XChaCha20Poly1305::new(key.as_ref().into()),
-                start_nonce.as_ref().into(),
+            EncryptorLE31::from_aead(
+                XChaCha20Poly1305::new((&key).into()),
+                (&start_nonce).into(),
             ),
         );
 
         assert_eq!(
             writer.write(b"some content").await.unwrap(),
-            "some content".bytes().len()
+            "some content".len()
         );
 
         assert_eq!(expected, writer.inner.buffer())

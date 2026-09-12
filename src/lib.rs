@@ -1,9 +1,13 @@
 #![doc = include_str!("../README.md")]
 use std::ops::Sub;
 
+pub use aead_stream;
+pub use chacha20poly1305;
+
+use aead_stream::{Decryptor, Encryptor, NewStream, NonceSize, StreamPrimitive};
 use chacha20poly1305::aead::{
-    generic_array::{ArrayLength, GenericArray},
-    stream::{Decryptor, Encryptor, NewStream, NonceSize, StreamPrimitive},
+    AeadInOut,
+    array::{Array, ArraySize},
 };
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -21,8 +25,8 @@ pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 /// [self::DEFAULT_BUFFER_SIZE] and chunk size of [self::DEFAULT_CHUNK_SIZE]  
 ///
 /// ```rust
-/// use chacha20poly1305::aead::stream::{DecryptorLE31, EncryptorLE31};
-/// use chacha20poly1305::XChaCha20Poly1305;
+/// use async_encrypted_stream::aead_stream::{DecryptorLE31, EncryptorLE31};
+/// use async_encrypted_stream::chacha20poly1305::XChaCha20Poly1305;
 ///
 /// use async_encrypted_stream::{ReadHalf, WriteHalf, encrypted_stream};
 ///
@@ -33,19 +37,19 @@ pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 /// let (mut reader, mut writer): (
 ///     ReadHalf<_, DecryptorLE31<XChaCha20Poly1305>>,
 ///     WriteHalf<_, EncryptorLE31<XChaCha20Poly1305>>,
-/// ) = encrypted_stream(rx, tx, key.as_ref().into(), nonce.as_ref().into());
+/// ) = encrypted_stream(rx, tx, (&key).into(), (&nonce).into());
 /// ````
 pub fn encrypted_stream<R: AsyncRead, W: AsyncWrite, A, S>(
     read: R,
     write: W,
-    key: &GenericArray<u8, A::KeySize>,
-    nonce: &GenericArray<u8, NonceSize<A, S>>,
+    key: &Array<u8, A::KeySize>,
+    nonce: &Array<u8, NonceSize<A, S>>,
 ) -> (ReadHalf<R, Decryptor<A, S>>, WriteHalf<W, Encryptor<A, S>>)
 where
     S: StreamPrimitive<A> + NewStream<A>,
-    A: chacha20poly1305::AeadInPlace + chacha20poly1305::KeyInit,
+    A: AeadInOut + chacha20poly1305::KeyInit,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     encrypted_stream_with_capacity(
         read,
@@ -61,8 +65,8 @@ where
 /// `buffer_size` and chunk size of `chunk_size`  
 ///
 /// ```rust
-/// use chacha20poly1305::aead::stream::{DecryptorLE31, EncryptorLE31};
-/// use chacha20poly1305::XChaCha20Poly1305;
+/// use async_encrypted_stream::aead_stream::{DecryptorLE31, EncryptorLE31};
+/// use async_encrypted_stream::chacha20poly1305::XChaCha20Poly1305;
 ///
 /// use async_encrypted_stream::{ReadHalf, WriteHalf, encrypted_stream_with_capacity};
 ///
@@ -73,22 +77,22 @@ where
 /// let (mut reader, mut writer): (
 ///     ReadHalf<_, DecryptorLE31<XChaCha20Poly1305>>,
 ///     WriteHalf<_, EncryptorLE31<XChaCha20Poly1305>>,
-/// ) = encrypted_stream_with_capacity(rx, tx, key.as_ref().into(), nonce.as_ref().into(), 4096,
+/// ) = encrypted_stream_with_capacity(rx, tx, (&key).into(), (&nonce).into(), 4096,
 /// 512);
 /// ````
 pub fn encrypted_stream_with_capacity<R: AsyncRead, W: AsyncWrite, A, S>(
     read: R,
     write: W,
-    key: &GenericArray<u8, A::KeySize>,
-    nonce: &GenericArray<u8, NonceSize<A, S>>,
+    key: &Array<u8, A::KeySize>,
+    nonce: &Array<u8, NonceSize<A, S>>,
     buffer_size: usize,
     chunk_size: usize,
 ) -> (ReadHalf<R, Decryptor<A, S>>, WriteHalf<W, Encryptor<A, S>>)
 where
     S: StreamPrimitive<A> + NewStream<A>,
-    A: chacha20poly1305::AeadInPlace + chacha20poly1305::KeyInit,
+    A: AeadInOut + chacha20poly1305::KeyInit,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     let encryptor = Encryptor::new(key, nonce);
     let decryptor = Decryptor::new(key, nonce);
@@ -109,10 +113,8 @@ fn get_key<const S: usize>(plain_key: &str, salt: &str) -> [u8; S] {
 mod tests {
     use std::{assert_eq, time::Duration};
 
-    use chacha20poly1305::{
-        aead::stream::{DecryptorLE31, EncryptorLE31},
-        XChaCha20Poly1305,
-    };
+    use aead_stream::{DecryptorLE31, EncryptorLE31};
+    use chacha20poly1305::XChaCha20Poly1305;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
@@ -126,7 +128,7 @@ mod tests {
         let (mut reader, mut writer): (
             ReadHalf<_, DecryptorLE31<XChaCha20Poly1305>>,
             WriteHalf<_, EncryptorLE31<XChaCha20Poly1305>>,
-        ) = super::encrypted_stream(rx, tx, key.as_ref().into(), nonce.as_ref().into());
+        ) = super::encrypted_stream(rx, tx, (&key).into(), (&nonce).into());
 
         let size = 1024 * 4;
         tokio::spawn(async move {

@@ -1,10 +1,5 @@
-use chacha20poly1305::{
-    aead::{
-        generic_array::ArrayLength,
-        stream::{Decryptor, NonceSize, StreamPrimitive},
-    },
-    AeadInPlace,
-};
+use aead_stream::{Decryptor, NonceSize, StreamPrimitive};
+use chacha20poly1305::aead::{array::ArraySize, AeadInOut};
 use pin_project_lite::pin_project;
 use std::{ops::Sub, pin::Pin, task::ready};
 
@@ -32,9 +27,9 @@ pin_project! {
 impl<T, A, S> ReadHalf<T, Decryptor<A, S>>
 where
     S: StreamPrimitive<A>,
-    A: AeadInPlace,
+    A: AeadInOut,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     pub fn new(inner: T, decryptor: Decryptor<A, S>) -> Self {
         Self::with_capacity(inner, decryptor, DEFAULT_BUFFER_SIZE)
@@ -132,9 +127,9 @@ impl<T, A, S> AsyncRead for ReadHalf<T, Decryptor<A, S>>
 where
     T: AsyncRead,
     S: StreamPrimitive<A>,
-    A: AeadInPlace,
+    A: AeadInOut,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     /// The poll read simply tries to produce a value from the internal buffer.
     /// If no value is produced, it then tries to poll more bytes from the inner reader
@@ -178,9 +173,9 @@ where
 impl<R: AsyncRead, A, S> tokio::io::AsyncBufRead for ReadHalf<R, Decryptor<A, S>>
 where
     S: StreamPrimitive<A>,
-    A: AeadInPlace,
+    A: AeadInOut,
     A::NonceSize: Sub<<S as StreamPrimitive<A>>::NonceOverhead>,
-    NonceSize<A, S>: ArrayLength<u8>,
+    NonceSize<A, S>: ArraySize,
 {
     fn poll_fill_buf(
         self: Pin<&mut Self>,
@@ -211,7 +206,8 @@ where
 mod tests {
     use std::{assert_eq, time::Duration};
 
-    use chacha20poly1305::{aead::stream::EncryptorLE31, KeyInit, XChaCha20Poly1305};
+    use aead_stream::{DecryptorLE31, EncryptorLE31};
+    use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::get_key;
@@ -228,9 +224,9 @@ mod tests {
         tokio::spawn(async move {
             let encrypted_content = {
                 let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
-                    chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
-                        XChaCha20Poly1305::new(key.as_ref().into()),
-                        start_nonce.as_ref().into(),
+                    EncryptorLE31::from_aead(
+                        XChaCha20Poly1305::new((&key).into()),
+                        (&start_nonce).into(),
                     );
 
                 let mut expected = Vec::new();
@@ -252,9 +248,9 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(20)).await;
 
-        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
-            XChaCha20Poly1305::new(key.as_ref().into()),
-            start_nonce.as_ref().into(),
+        let decryptor = DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new((&key).into()),
+            (&start_nonce).into(),
         );
         let mut reader = ReadHalf::new(rx, decryptor);
 
@@ -274,9 +270,9 @@ mod tests {
 
         let (rx, _tx) = tokio::io::duplex(100);
 
-        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
-            XChaCha20Poly1305::new(key.as_ref().into()),
-            start_nonce.as_ref().into(),
+        let decryptor = DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new((&key).into()),
+            (&start_nonce).into(),
         );
         let mut reader = ReadHalf::new(rx, decryptor);
         let mut reader_data = Vec::from_iter(10u32.to_le_bytes());
@@ -297,9 +293,9 @@ mod tests {
         let start_nonce = [0u8; 20];
 
         let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
-            chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
-                XChaCha20Poly1305::new(key.as_ref().into()),
-                start_nonce.as_ref().into(),
+            EncryptorLE31::from_aead(
+                XChaCha20Poly1305::new((&key).into()),
+                (&start_nonce).into(),
             );
 
         let mut record1 = {
@@ -325,9 +321,9 @@ mod tests {
         let (rx, mut tx) = tokio::io::duplex(4096);
         tx.write_all(record2_tail).await.unwrap();
 
-        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
-            XChaCha20Poly1305::new(key.as_ref().into()),
-            start_nonce.as_ref().into(),
+        let decryptor = DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new((&key).into()),
+            (&start_nonce).into(),
         );
         let mut reader = ReadHalf::with_capacity(rx, decryptor, record1.len() + record2_head.len());
 
@@ -357,9 +353,9 @@ mod tests {
 
         tokio::spawn(async move {
             let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
-                chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
-                    XChaCha20Poly1305::new(key.as_ref().into()),
-                    start_nonce.as_ref().into(),
+                EncryptorLE31::from_aead(
+                    XChaCha20Poly1305::new((&key).into()),
+                    (&start_nonce).into(),
                 );
 
             let content = "a".repeat(500);
@@ -371,9 +367,9 @@ mod tests {
             let _ = tx.write_all(&encrypted_content).await;
         });
 
-        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
-            XChaCha20Poly1305::new(key.as_ref().into()),
-            start_nonce.as_ref().into(),
+        let decryptor = DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new((&key).into()),
+            (&start_nonce).into(),
         );
         let mut reader = ReadHalf::new(rx, decryptor);
 
