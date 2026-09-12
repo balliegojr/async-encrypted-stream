@@ -1,5 +1,10 @@
 # Async Encrypted Stream
 
+
+[![Rust](https://github.com/balliegojr/async-encrypted-stream/actions/workflows/rust.yml/badge.svg)](https://github.com/balliegojr/async-encrypted-stream/actions/workflows/rust.yml)
+[![dependency status](https://deps.rs/repo/github/balliegojr/async-encrypted-stream/status.svg)](https://deps.rs/repo/github/balliegojr/async-encrypted-stream)
+
+
 Async Read and Write wrappers around the chacha20 encryption primitives.
 
 This crate exposes a pair of [ReadHalf] and [WriteHalf] structs that works with any [tokio::io::AsyncRead] and [tokio::io::AsyncWrite] respectively.
