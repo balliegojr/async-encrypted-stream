@@ -21,7 +21,11 @@ pin_project! {
         decryptor: U,
         buffer: Vec<u8>,
         pos: usize,
-        cap: usize
+        cap: usize,
+
+        // Decrypted bytes from a message that didn't fully fit in the caller's read buffer,
+        // waiting to be delivered on subsequent `poll_read` calls.
+        overflow: Vec<u8>
     }
 }
 
@@ -42,6 +46,7 @@ where
             buffer: vec![0u8; size],
             pos: 0,
             cap: 0,
+            overflow: Vec::new(),
         }
     }
 
@@ -50,6 +55,12 @@ where
     /// When a value is produced, it will advance the buffer to the position for the next value.
     fn produce(mut self: Pin<&mut Self>) -> std::io::Result<Option<Vec<u8>>> {
         if self.cap <= self.pos {
+            return Ok(None);
+        }
+
+        if self.cap - self.pos < 4 {
+            // Not enough bytes buffered yet to even read the length prefix.
+            self.adjust_buffer(4);
             return Ok(None);
         }
 
@@ -128,6 +139,9 @@ where
     /// The poll read simply tries to produce a value from the internal buffer.
     /// If no value is produced, it then tries to poll more bytes from the inner reader
     ///
+    /// If a decrypted message is larger than the caller's buffer, the remainder is held in an
+    /// internal overflow buffer and delivered on subsequent calls, instead of being discarded.
+    ///
     /// This function may return a [std::io::ErrorKind::InvalidData] if it is not possible to decrypt
     /// the message, in this case, further read attempts will always produce the same error.
     fn poll_read(
@@ -136,15 +150,21 @@ where
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         loop {
-            if let Some(decrypted) = self.as_mut().produce()? {
-                if decrypted.len() > buf.remaining() {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::OutOfMemory,
-                        "Decrypted value exceeds buffer capacity",
-                    ))?;
-                }
+            if !self.overflow.is_empty() {
+                let me = self.as_mut().project();
+                let n = std::cmp::min(me.overflow.len(), buf.remaining());
+                buf.put_slice(&me.overflow[..n]);
+                me.overflow.drain(..n);
+                return std::task::Poll::Ready(Ok(()));
+            }
 
-                buf.put_slice(&decrypted);
+            if let Some(decrypted) = self.as_mut().produce()? {
+                let n = std::cmp::min(decrypted.len(), buf.remaining());
+                buf.put_slice(&decrypted[..n]);
+                if n < decrypted.len() {
+                    let me = self.as_mut().project();
+                    me.overflow.extend_from_slice(&decrypted[n..]);
+                }
                 return std::task::Poll::Ready(Ok(()));
             }
 
@@ -269,5 +289,106 @@ mod tests {
 
         assert!(reader.read(&mut buf).await.is_err());
         assert!(reader.read(&mut buf).await.is_err());
+    }
+
+    #[tokio::test]
+    pub async fn test_read_with_header_split_near_buffer_end() {
+        let key: [u8; 32] = get_key("key", "group");
+        let start_nonce = [0u8; 20];
+
+        let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
+            chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
+                XChaCha20Poly1305::new(key.as_ref().into()),
+                start_nonce.as_ref().into(),
+            );
+
+        let mut record1 = {
+            let mut encrypted = encryptor.encrypt_next("hi".as_bytes()).unwrap();
+            let mut record = Vec::new();
+            record.extend((encrypted.len() as u32).to_le_bytes());
+            record.append(&mut encrypted);
+            record
+        };
+
+        let record2 = {
+            let mut encrypted = encryptor.encrypt_next("there".as_bytes()).unwrap();
+            let mut record = Vec::new();
+            record.extend((encrypted.len() as u32).to_le_bytes());
+            record.append(&mut encrypted);
+            record
+        };
+
+        // Only the first 2 bytes of message 2's 4-byte length header will already be
+        // sitting in the internal buffer; the rest arrives later through the reader.
+        let (record2_head, record2_tail) = record2.split_at(2);
+
+        let (rx, mut tx) = tokio::io::duplex(4096);
+        tx.write_all(record2_tail).await.unwrap();
+
+        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new(key.as_ref().into()),
+            start_nonce.as_ref().into(),
+        );
+        let mut reader = ReadHalf::with_capacity(rx, decryptor, record1.len() + record2_head.len());
+
+        // Pre-load message 1 in full, plus the first 2 bytes of message 2's header,
+        // filling the internal buffer to exactly its capacity. Once message 1 is
+        // consumed, `pos` sits only 2 bytes away from the end of the buffer, with
+        // less than 4 bytes available for message 2's header.
+        record1.extend_from_slice(record2_head);
+        reader.buffer = record1.clone();
+        reader.cap = record1.len();
+        reader.pos = 0;
+
+        let mut buf = [0u8; 1024];
+        let n = reader.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"hi");
+
+        let n = reader.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"there");
+    }
+
+    #[tokio::test]
+    pub async fn test_read_buffer_smaller_than_message() {
+        let key: [u8; 32] = get_key("key", "group");
+        let start_nonce = [0u8; 20];
+
+        let (rx, mut tx) = tokio::io::duplex(4096);
+
+        tokio::spawn(async move {
+            let mut encryptor: EncryptorLE31<XChaCha20Poly1305> =
+                chacha20poly1305::aead::stream::EncryptorLE31::from_aead(
+                    XChaCha20Poly1305::new(key.as_ref().into()),
+                    start_nonce.as_ref().into(),
+                );
+
+            let content = "a".repeat(500);
+            let mut encrypted = encryptor.encrypt_next(content.as_bytes()).unwrap();
+            let mut encrypted_content = Vec::new();
+            encrypted_content.extend((encrypted.len() as u32).to_le_bytes());
+            encrypted_content.append(&mut encrypted);
+
+            let _ = tx.write_all(&encrypted_content).await;
+        });
+
+        let decryptor = chacha20poly1305::aead::stream::DecryptorLE31::from_aead(
+            XChaCha20Poly1305::new(key.as_ref().into()),
+            start_nonce.as_ref().into(),
+        );
+        let mut reader = ReadHalf::new(rx, decryptor);
+
+        // The caller's buffer is far smaller than the 500-byte decrypted message, so
+        // delivering it must span several `read` calls instead of erroring/dropping data.
+        let mut plain_content = String::new();
+        let mut small_buf = [0u8; 64];
+        loop {
+            let n = reader.read(&mut small_buf).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            plain_content.push_str(std::str::from_utf8(&small_buf[..n]).unwrap());
+        }
+
+        assert_eq!(plain_content, "a".repeat(500));
     }
 }
