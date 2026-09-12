@@ -19,6 +19,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Clippy
+      run: cargo clippy --all-features -- -D warnings
     - name: Build
       run: cargo build --verbose --all-features
     - name: Run tests
