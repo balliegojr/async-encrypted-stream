@@ -1,3 +1,9 @@
+# 0.1.3
+
+### Fixes
+- Fix a panic in the read half when a message's length header arrives split across reads and lands near the end of the internal buffer
+- Fix data loss and a spurious error when a decrypted message is larger than the caller's read buffer; the remainder is now buffered internally and delivered on subsequent reads
+
 # 0.1.2 
 
 ### Fixes
