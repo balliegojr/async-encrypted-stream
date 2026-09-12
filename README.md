@@ -12,16 +12,14 @@ This crate exposes a pair of [ReadHalf] and [WriteHalf] structs that works with 
 To use this crate, it is necessary to add [chacha20poly1305](https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305) as a dependency as well.
 
 ```Cargo.toml
-async-encrypted-stream = "0.1"
-chacha20poly1305 = { version = "0.10", features = ["stream", "std"] }
+async-encrypted-stream = "0.2"
 ```
 
 Once the necessary dependencies are added, creating the stream is fairly trivial
 
 ```rust
-use chacha20poly1305::aead::stream::{DecryptorLE31, EncryptorLE31};
-use chacha20poly1305::XChaCha20Poly1305;
-
+use async_encrypted_stream::aead_stream::{DecryptorLE31, EncryptorLE31};
+use async_encrypted_stream::chacha20poly1305::XChaCha20Poly1305;
 use async_encrypted_stream::{ReadHalf, WriteHalf, encrypted_stream};
 
 // The key and nonce used must be the same on both ends of the stream
@@ -33,5 +31,5 @@ let (rx, tx) = tokio::io::duplex(4096);
 let (mut reader, mut writer): (
     ReadHalf<_, DecryptorLE31<XChaCha20Poly1305>>,
     WriteHalf<_, EncryptorLE31<XChaCha20Poly1305>>,
-) = encrypted_stream(rx, tx, key.as_ref().into(), nonce.as_ref().into());
+) = encrypted_stream(rx, tx, (&key).into(), (&nonce).into());
 ```

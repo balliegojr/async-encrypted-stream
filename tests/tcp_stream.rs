@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use chacha20poly1305::aead::stream::{DecryptorLE31, EncryptorLE31};
+use aead_stream::{DecryptorLE31, EncryptorLE31};
 use chacha20poly1305::XChaCha20Poly1305;
 
 use async_encrypted_stream::{encrypted_stream, ReadHalf, WriteHalf};
@@ -41,7 +41,7 @@ fn get_stream(
     let key = [0u8; 32];
     let nonce = [0u8; 20];
 
-    encrypted_stream(rx, tx, key.as_ref().into(), nonce.as_ref().into())
+    encrypted_stream(rx, tx, (&key).into(), (&nonce).into())
 }
 
 async fn echo_server() -> Result<u16, std::io::Error> {
